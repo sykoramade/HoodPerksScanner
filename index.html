@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HoodPerks Business Scanner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .success, .confirm, .processing {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        .processing {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        h1 {
+            text-align: center;
+        }
+        #result {
+            margin-top: 20px;
+        }
+        .button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 5px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .cancel-button {
+            background-color: #f44336;
+        }
+        .button-container {
+            text-align: center;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>HoodPerks Scanner</h1>
+    <div id="scanner-container">
+        <div id="qr-reader" style="width: 100%"></div>
+        <div id="result"></div>
+    </div>
+    <script>
+        // Hardcoded business for testing
+        const businessId = "demo-business";
+        // Server URL - replace with your computer's local IP address
+        const SERVER_URL = "https://c08f-2a02-3100-1d78-6100-d4a4-1c99-a8e3-f31a.ngrok-free.app";
+        let currentQrData = null;
+        
+        function onScanSuccess(decodedText) {
+            // Stop the scanner
+            html5QrcodeScanner.pause();
+            
+            // Hide the scanner element
+            document.getElementById('qr-reader').style.display = 'none';
+            document.getElementById('result').innerHTML = "Processing...";
+            
+            try {
+                // Parse the URL from the QR code
+                const url = new URL(decodedText);
+                
+                // Verify this is a HoodPerks URL
+                if (url.protocol !== 'hoodperks:') {
+                    throw new Error('Invalid QR code format');
+                }
+                
+                // Extract parameters
+                const params = new URLSearchParams(url.search);
+                currentQrData = {
+                    userId: params.get('uid'),
+                    business: params.get('biz'),
+                    timestamp: params.get('ts'),
+                    token: params.get('token'),
+                    sessionId: params.get('sid')
+                };
+                
+                // Get business name from the business identifier
+                const businessName = currentQrData.business.split(':')[0];
+                
+                // For testing, we'll assume the current stamp count is between 0-5
+                const currentCount = Math.floor(Math.random() * 5); // Random 0-4
+                const newCount = currentCount + 1;
+                const canRedeem = newCount >= 6;
+                
+                // Show confirmation screen
+                document.getElementById('result').innerHTML = `
+                    <div class="confirm">
+                        <h2>QR Code Scanned</h2>
+                        <p>Business: ${businessName}</p>
+                        <p>User ID: ${currentQrData.userId}</p>
+                        <p>Session ID: ${currentQrData.sessionId}</p>
+                        <p>Current stamps: ${currentCount}/6</p>
+                        <p>After stamping: ${newCount}/6</p>
+                        ${canRedeem ? '<p>⭐ Customer will be eligible to redeem a reward!</p>' : ''}
+                        <div class="button-container">
+                            <button class="button" onclick="confirmStamp()">Confirm Stamp</button>
+                            <button class="button cancel-button" onclick="cancelStamp()">Cancel</button>
+                        </div>
+                    </div>
+                `;
+                
+            } catch (e) {
+                console.error(e);
+                document.getElementById('result').innerHTML = `
+                    <div class="error">
+                        <h2>❌ Error</h2>
+                        <p>Invalid QR code: ${e.message}</p>
+                        <p>Raw data: ${decodedText}</p>
+                        <div class="button-container">
+                            <button class="button" onclick="resetScanner()">Try Again</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        function confirmStamp() {
+            if (!currentQrData) {
+                document.getElementById('result').innerHTML = `
+                    <div class="error">
+                        <h2>❌ Error</h2>
+                        <p>No QR data found</p>
+                        <div class="button-container">
+                            <button class="button" onclick="resetScanner()">Try Again</button>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Show processing message
+            document.getElementById('result').innerHTML = `
+                <div class="processing">
+                    <h2>Processing...</h2>
+                    <p>Confirming stamp with server.</p>
+                </div>
+            `;
+            
+            // Send confirmation to server
+            fetch(`${SERVER_URL}/confirm-stamp`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    businessId: businessId,
+                    qrData: currentQrData
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess();
+                } else {
+                    showError(data.error || "Unknown error");
+                }
+            })
+            .catch(error => {
+                console.error("Server communication error:", error);
+                showError(`Could not connect to server at ${SERVER_URL}. Make sure the bridge server is running.`);
+            });
+        }
+        
+        function showSuccess() {
+            document.getElementById('result').innerHTML = `
+                <div class="success">
+                    <h2>✅ Stamp Confirmed!</h2>
+                    <p>The stamp has been added to the customer's card.</p>
+                    <p>The customer will receive a notification in their Telegram bot.</p>
+                    <div class="button-container">
+                        <button class="button" onclick="resetScanner()">Scan Another</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function showError(message) {
+            document.getElementById('result').innerHTML = `
+                <div class="error">
+                    <h2>❌ Error</h2>
+                    <p>${message}</p>
+                    <div class="button-container">
+                        <button class="button" onclick="resetScanner()">Try Again</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function cancelStamp() {
+            document.getElementById('result').innerHTML = `
+                <div class="error">
+                    <h2>Cancelled</h2>
+                    <p>Stamp process was cancelled.</p>
+                    <div class="button-container">
+                        <button class="button" onclick="resetScanner()">Try Again</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function resetScanner() {
+            // Clear the current QR data
+            currentQrData = null;
+            
+            // Show the scanner again
+            document.getElementById('qr-reader').style.display = 'block';
+            document.getElementById('result').innerHTML = "";
+            
+            // Resume scanning
+            html5QrcodeScanner.resume();
+        }
+        
+        function onScanFailure(error) {
+            // No-op for continuous scanning
+        }
+        
+        const html5QrcodeScanner = new Html5QrcodeScanner(
+            "qr-reader", { fps: 10, qrbox: 250 });
+        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    </script>
+</body>
+</html>
